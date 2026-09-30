@@ -19,7 +19,7 @@ const COMMON_PATH = process.env.LEIZAI_CONFIG_COMMON_PATH || path.join(ROOT, 'co
 const INSTANCE_KEYS = new Set(['agent', 'port', 'workdir', 'dataDir', 'temperature', 'contextBudget']);
 
 const DEFAULTS = {
-  port: 3457,
+  port: 3458,
   host: '127.0.0.1',
   workdir: path.join(ROOT, 'workspace'),
   // 意识数据目录（可迁移）：默认为 ROOT/data，但可被 config.json 的 dataDir 或环境变量
