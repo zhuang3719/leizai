@@ -35,6 +35,10 @@ app/
 app_preview/
 license-server/
 
+# Pro 私模（闭源，绝不入开源仓）
+src-pro/
+pro/
+
 # 备份 / 临时
 *.bak
 *.bak_*
