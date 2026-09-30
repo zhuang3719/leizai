@@ -1,0 +1,62 @@
+# === 雷仔 open-source .gitignore ===
+# 依赖与构建产物
+node_modules/
+webui/dist/
+build/
+dist/
+
+# 运行时数据（绝不入库）
+data/
+workspace/
+projects/
+sessions/
+memory/
+logs/
+webview2-data/
+项目文件/
+雷影/
+
+# 配置与密钥（含真实凭证，禁止提交）
+config.json
+config.common.json
+config*.json
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+*credentials*
+*secret*
+
+# 应用外壳 / 授权服务端（不随开源仓发布）
+app/
+app_preview/
+license-server/
+
+# 备份 / 临时
+*.bak
+*.bak_*
+*.bak-*
+*_bak/
+*_bak_*
+_bak*/
+_bak*
+_tmp/
+_tmp/*
+_tmp_*
+_archive/
+_backups/
+
+# 二进制产物（走 Release，不入库）
+*.exe
+*.dll
+*.zip
+*.log
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
