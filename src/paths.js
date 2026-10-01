@@ -1,6 +1,7 @@
 'use strict';
 // 雷仔 · 数据路径（Node 侧）。优先读 env LEIZAI_DATA_DIR（由 shell/Paths.cs 注入），仅兜底自算。
-// 与外层 shell/Paths.cs 保持同一优先级链：env > portable.flag(安装根) > %LOCALAPPDATA%\LeiZai > 代码目录。
+// 与外层 shell/Paths.cs 保持同一优先级链：env > portable.flag(安装根) > %LOCALAPPDATA%\LeiZaiData > 代码目录。
+// ⚠ 安装版数据根 = %LOCALAPPDATA%\LeiZaiData（不可用 %LOCALAPPDATA%\LeiZai——那是 Velopack {packId} 安装目录，卸载会整目录删除）。
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -30,9 +31,9 @@ function root() {
   // ② portable.flag（安装根 / 绿色目录）
   const f = findPortableFlag(CODE_ROOT);
   if (f) { _root = f; return _root; }
-  // ③ %LOCALAPPDATA%\LeiZai
+  // ③ %LOCALAPPDATA%\LeiZaiData（安装版默认；避开 Velopack {packId} 安装目录 %LOCALAPPDATA%\LeiZai，防卸载误删）
   const lad = process.env.LOCALAPPDATA || process.env.USERPROFILE;
-  if (lad) { _root = path.join(lad, 'LeiZai'); return _root; }
+  if (lad) { _root = path.join(lad, 'LeiZaiData'); return _root; }
   // ④ 兜底
   _root = CODE_ROOT;
   return _root;

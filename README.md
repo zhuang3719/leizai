@@ -44,6 +44,13 @@ npm test             # 集成测试（scripts/integration-test.mjs）
 npm run smoke        # 冒烟测试（scripts/api-smoke.mjs）
 ```
 
+## 数据位置与卸载（桌面版）
+
+- **数据根**：`%LOCALAPPDATA%\LeiZaiData`（含 `config*.json`、`data/`、`workspace/`、`projects/`、`logs/`）。
+- **卸载不会删除数据**：卸载程序只移除安装目录 `%LOCALAPPDATA%\LeiZai`（程序文件），数据目录独立存放，重装后原数据仍在。
+- **手动清理**：如需彻底清除，关闭程序后删除 `%LOCALAPPDATA%\LeiZaiData` 即可。
+- 便携版（Portable）数据跟随解压目录；可用 `portable.flag` 标记绿色目录。
+
 ## 许可证
 
 本项目以 **Apache License 2.0** 发布，详见 [LICENSE](./LICENSE)。
