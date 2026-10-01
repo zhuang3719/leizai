@@ -1244,6 +1244,31 @@ function markRepliedIfUnreplied(ids) {
   return r.changes;
 }
 
+/** v6.5x：中断/强杀收口——先给发起方**发 result**（根治"只标不发"致发起方永收不到回执），再补标 replied。
+ *  仅对 type='task' 且 replied_at IS NULL 且 from_id 非空且 from_id!==fromRole 的条目发；**无 cid 也发**（不带
+ *  correlationId，交由 P2b-6/P1a 关单）。信息类自然只标不发。每条 try 包裹，失败不影响收尾。返回实际发送条数。 */
+function sendInterruptedResults(ids, opts = {}) {
+  if (!db || !ids || !ids.length) return 0;
+  const fromRole = String((opts && opts.fromRole) || selfRole() || '');
+  const fromSessionId = (opts && opts.fromSessionId) || '';
+  const outcome = (opts && opts.outcome) || 'failed';
+  const content = (opts && opts.content) || '⚠ 回合被中断，未产生结果，请重发。';
+  let sent = 0;
+  for (const id of new Set(ids.map(String))) {
+    try {
+      const row = db.prepare('SELECT id,type,from_id,replied_at,correlation_id FROM agent_messages WHERE id=?').get(String(id));
+      if (!row || row.type !== 'task' || row.replied_at != null) continue;
+      const to = String(row.from_id || '');
+      if (!to || to === fromRole) continue;
+      const p = { fromRole, fromSessionId, toRole: to, content, type: 'result', outcome };
+      if (row.correlation_id) p.correlationId = String(row.correlation_id);
+      try { sendToRole(p); sent++; } catch { }
+    } catch { }
+  }
+  try { markRepliedIfUnreplied(ids); } catch { }
+  return sent;
+}
+
 function reconcileInterruptedInbound() {
   if (!db) return 0;
   const role = selfRole();
@@ -2312,7 +2337,7 @@ module.exports = {
   markCidWoke, cidWoke, listNotWokeInbound, hasNotWokeInbound,   // v6.47：接收侧真起回合记位 + 未起回合入站扫描（唤醒丢失兜底）
   listStaleSilentInbound, markStaleSilentNotified,   // v6.53：知情类回执空闲兜底唤醒（reply/ack/notify 漏收根治）
 
-  sendMessage, fetchUnread, fetchUnreadForSession, fetchInboundByIds, countUnread, markRead, markProcessing, markReplied, markRepliedIfUnreplied, reconcileInterruptedInbound, markDelivered, markAgedNonActionRead, sweepReadInfoConverge, sweepSilentRead, classify,   // v6.50：判据单源 + 静默收口
+  sendMessage, fetchUnread, fetchUnreadForSession, fetchInboundByIds, countUnread, markRead, markProcessing, markReplied, markRepliedIfUnreplied, sendInterruptedResults, reconcileInterruptedInbound, markDelivered, markAgedNonActionRead, sweepReadInfoConverge, sweepSilentRead, classify,   // v6.50：判据单源 + 静默收口
   listPending, listPendingForSession, getMessage, hasReplySince,
   linkSession, resolveSession, listLinks, linksWithStatus,
   createPeerSession, deliver, sendToRole, scheduleWake, flushWake,

@@ -2667,7 +2667,7 @@ function forceReleaseStuckTurn(s, where) {
     const mb = require('./mailbox');
     const ids = (s && s._turnConsumedIds && s._turnConsumedIds.size) ? [...s._turnConsumedIds] : [];
     if (s && s._turnConsumedInfoIds && s._turnConsumedInfoIds.size) for (const id of s._turnConsumedInfoIds) ids.push(id);
-    if (ids.length && mb.available() && mb.markRepliedIfUnreplied) mb.markRepliedIfUnreplied(ids);
+    if (ids.length && mb.available() && mb.sendInterruptedResults) mb.sendInterruptedResults(ids, { fromRole: selfRole(), fromSessionId: s.id, outcome: 'failed', content: '⚠ 回合被中断，未产生结果，请重发' });
   } catch { }
   try { s._turnConsumedIds = null; } catch { }
   try { s._turnConsumedInfoIds = null; } catch { }
@@ -3620,7 +3620,7 @@ let busyHbTimer = null;
       const _ids = turnActionableIds.size ? [...turnActionableIds] : [];
       // v6.34：信息类（reply/ack/notify 等）已消费 → 一并终态化（replied_at 置位 + status='done'）→ 不再被 listPending 命中（现象B）
       if (turnInformationalIds.size) for (const id of turnInformationalIds) _ids.push(id);
-      if (_ids.length && mb2.available() && mb2.markRepliedIfUnreplied) mb2.markRepliedIfUnreplied(_ids);
+      if (_ids.length && mb2.available() && mb2.sendInterruptedResults) mb2.sendInterruptedResults(_ids, { fromRole: selfRole(), fromSessionId: s.id, outcome: 'failed', content: '⚠ 回合被中断，未产生结果，请重发' });
     } catch { /* 补回写失败不得影响收尾 */ }
     // P2b-4 T2：撤回停手 → 回 result(cancelled) 给发起方（幂等；终态单调由 sendMessage/closeTaskByCid 保证）。
     if (turnCancelCid) {

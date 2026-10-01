@@ -23,6 +23,9 @@ function inboxFile(id) { return path.join(INBOX_DIR, `${String(id).replace(/[^A-
 
 async function spawn(args, parentCtx) {
   ensure();
+  // Pro 门禁（soft-gate）：多角色属 Pro；Lite 态拒绝。gate 绝不 throw，异常一律放行。
+  { let _pg = { allow: true }; try { _pg = await require('./pro/gate').checkPro('multi-agent', { op: 'spawn', role: args && args.role }); } catch { } 
+    if (_pg.allow === false) throw new Error(`多角色（子智能体）属 Pro 能力（当前 ${_pg.tier} 档｜${_pg.reason}），升级 Pro 后可用`); }
   pruneOld(); // 新派子智能体前清理过期旧记录，防无限膨胀
   const cfg = parentCtx.cfg;
   const id = `sub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -116,6 +119,9 @@ async function send(agentId, message, from, type, priority, extra) {
   const msgType = (type === 'reply' || type === 'notify' || type === 'ack' || type === 'task' || type === 'result') ? type : 'task';
   const ex = (extra && typeof extra === 'object') ? extra : {};
   const prio = (priority === 'urgent' || priority === 'high' || priority === 'normal') ? priority : 'normal';
+  // Pro 门禁（soft-gate）：派单协作属 Pro；Lite 态拒绝。gate 绝不 throw，异常一律放行。
+  { let _pg = { allow: true }; try { _pg = await require('./pro/gate').checkPro('multi-agent', { op: 'send', to: agentId, type: msgType }); } catch { } 
+    if (_pg.allow === false) throw new Error(`跨智能体通信（派单协作）属 Pro 能力（当前 ${_pg.tier} 档｜${_pg.reason}），升级 Pro 后可用`); }
   // —— 统一信箱（共享 SQLite 库）优先：目标 role 已注册 → 落库 + HTTP 投递唤醒 ——
   // mailbox 不可用 / 目标未注册为 role（如本地 sub-*）→ 回退旧 jsonl 逻辑，行为兼容。
   try {

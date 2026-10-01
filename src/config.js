@@ -3,23 +3,24 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const ROOT = path.resolve(__dirname, '..');
+const P = require('./paths');                      // P1 布局方案A：数据路径单一权威
+const ROOT = path.resolve(__dirname, '..');        // 代码目录（只读二进制所在），非数据根
 /** 配置文件路径：环境变量 `LEIZAI_CONFIG_PATH` 优先（供测试隔离，指向临时 config）；
- *  未设置则用默认 `<ROOT>/config.json`。每次解析 → 即便在 require 之后设 env 也能生效。 */
+ *  未设置则用数据根下的 config.json（paths.configPath()）。每次解析 → 即便 require 后设 env 也能生效。 */
 function configPath() {
   const p = process.env.LEIZAI_CONFIG_PATH;
-  return p ? path.resolve(p) : path.join(ROOT, 'config.json');
+  return p ? path.resolve(p) : P.configPath();
 }
 const CONFIG_PATH = configPath();   // 初始快照（兼容旧引用）；实际读写一律走 configPath()
 
 /** 公共配置层路径：环境变量 `LEIZAI_CONFIG_COMMON_PATH` 优先；未设置则用 `<ROOT>/config.common.json`。
  *  公共键（非 INSTANCE_KEYS）集中于此，作为唯一来源；实例 config.json 只留专属键。 */
-const COMMON_PATH = process.env.LEIZAI_CONFIG_COMMON_PATH || path.join(ROOT, 'config.common.json');
+const COMMON_PATH = process.env.LEIZAI_CONFIG_COMMON_PATH || P.commonPath();
 /** 实例专属键白名单：这些键留在实例 config.json，其余键一律进公共层 config.common.json。 */
 const INSTANCE_KEYS = new Set(['agent', 'port', 'workdir', 'dataDir', 'temperature', 'contextBudget']);
 
 const DEFAULTS = {
-  port: 3458,
+  port: 3457,
   host: '127.0.0.1',
   workdir: path.join(ROOT, 'workspace'),
   // 意识数据目录（可迁移）：默认为 ROOT/data，但可被 config.json 的 dataDir 或环境变量
@@ -208,6 +209,8 @@ const DEFAULTS = {
   mailboxIdleSweepDelaysMs: [0, 5000, 30000],  // 复查时机（毫秒）；有界重试，幂等无空转
   mailboxStaleInboundWake: true,       // v6.53：知情类回执(reply/ack/notify)空闲兜底唤醒——超阈值未读且会话空闲 → 兜底唤醒一次（治漏收回执）；false 关
   mailboxStaleInboundWakeMs: 45000,    // v6.53：上述兜底的"停留阈值"(ms)：入站未读超过该时长才兜底唤醒。须 < mailboxSilentReadMinAgeMs(60000) 保证兜底先于静默标读（v6.53a）
+  // —— Pro 分档门禁（soft-gate）——见 src/pro/gate.js。默认 devAllowAll=true：无 license 也按 Pro 放行，绝不锁死功能。
+  pro: { devAllowAll: true, enforce: false, serverUrl: 'https://api.leizai.cc', licenseKey: '', deviceId: '', proModule: '' },
 };
 
 /** 安全读 JSON：读文件→剥前导 BOM→JSON.parse。
@@ -245,6 +248,9 @@ function load() {
   if (!base.projectFilesRoot) base.projectFilesRoot = path.join(ROOT, '项目文件');
   // 项目名册库：默认跟随 dataDir（可用 config.projectRegistryDb 绝对路径覆盖）
   if (!base.projectRegistryDb) base.projectRegistryDb = path.join(path.resolve(base.dataDir), 'projects_shared.db');
+  // Pro 分档：确保 pro 段存在（默认取 DEFAULTS.pro；缺 key 补齐，绝不 throw）。C 端可覆盖 licenseKey 等。
+  if (!base.pro || typeof base.pro !== 'object') base.pro = {};
+  base.pro = { ...DEFAULTS.pro, ...base.pro };
   return base;
 }
 
@@ -255,7 +261,7 @@ function load() {
 const MOJIBAKE_REPLACEMENT = /\uFFFD/;                       // 解码失败替换符（最硬信号）
 const MOJIBAKE_SEQ = /锟斤拷|锟斤|鐎|鍜|鎴|娴|鍚|鏄|鐨|绱|锛|鑻|鍑|鏂/;   // GBK/UTF-8 双解常见串
 const MOJIBAKE_FIELD = /"(?:name|domain|title|project|provider|model|role)"\s*:\s*"[?\uFFFD\s]+"/;  // 值整串=问号/替换符/空白
-const MOJIBAKE_RUNQ = /\?{3,}/;   // 值内连续 ≥3 个问号（实测全部真实 config 命中数=0，安全）——覆盖 `<REPO_ROOT>\????` 这类
+const MOJIBAKE_RUNQ = /\?{3,}/;   // 值内连续 ≥3 个问号（实测全部真实 config 命中数=0，安全）——覆盖 `F:\leizai\????` 这类
 
 /** 判断文本是否疑似 mojibake / 非 UTF-8 写入。@returns {boolean} true=可疑，应拒绝写入 */
 function looksMojibake(text) {
@@ -293,8 +299,9 @@ function save(cfg) {
   fs.writeFileSync(COMMON_PATH, commonStr, 'utf8');
 }
 
-// 派生意识数据目录（DATA_DIR）：供各模块用 ROOT/data 的地方改为 DATA_DIR
-const _loaded = load();
-const DATA_DIR = path.resolve(_loaded.dataDir || path.join(ROOT, 'data'));
+// 意识数据目录（DATA_DIR）：P1 布局方案A 起由 src/paths.js 统一派生
+// （env LEIZAI_DATA_DIR > portable.flag 安装根 > %LOCALAPPDATA%\LeiZai > 代码目录）。
+// config.dataDir 已退役为「播种来源」——不再作运行时权威，避免与 env 两套并存。
+const DATA_DIR = P.dataDir();
 
 module.exports = { ROOT, CONFIG_PATH, COMMON_PATH, configPath, DATA_DIR, load, save, looksMojibake };

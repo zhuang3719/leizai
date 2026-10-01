@@ -53,7 +53,9 @@ $refs = @(
     '/r:System.Drawing.dll',
     '/r:System.Web.Extensions.dll',
     ('/r:' + (Join-Path $libdir 'Microsoft.Web.WebView2.Core.dll')),
-    ('/r:' + (Join-Path $libdir 'Microsoft.Web.WebView2.WinForms.dll'))
+    ('/r:' + (Join-Path $libdir 'Microsoft.Web.WebView2.WinForms.dll')),
+    ('/r:' + (Join-Path $root '_tools\velopack\lib\Velopack.dll')),
+    ('/r:' + (Join-Path $root '_tools\velopack\lib\Newtonsoft.Json.dll'))
 )
 $sources = Get-ChildItem (Join-Path $root 'shell\*.cs') | ForEach-Object { $_.FullName }
 # v6.53：内嵌原生遮罩品牌海报（loop 首帧）——确保 exe 任意目录运行都有品牌帧（资源名=boot_loop_first_frame.png）
@@ -77,6 +79,10 @@ if ($errs) {
 # 5) 托管 DLL + Loader DLL 随 exe 拷贝同目录（csc /r 只引用，运行时需同目录可加载）
 foreach ($dll in @('Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.WinForms.dll', 'WebView2Loader.dll')) {
     Copy-Item (Join-Path $libdir $dll) (Join-Path $root $dll) -Force
+}
+# P1：Velopack 运行时 DLL 随 exe 拷贝（未安装态需可加载，不崩）
+foreach ($dll in @('Velopack.dll', 'Newtonsoft.Json.dll')) {
+    Copy-Item (Join-Path $root ('_tools\velopack\lib\' + $dll)) (Join-Path $root $dll) -Force
 }
 
 # v6.55：本地 splash 页随 exe 拷贝（file:// 零引擎依赖，开机即动画）

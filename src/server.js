@@ -591,6 +591,19 @@ async function route(req, res, url) {
     return sendJson(res, 200, { ok: true, name: '雷仔', role: _role, agentName: _agentName, ts: Date.now() });
   }
   if (is('/api/daemon')) return sendJson(res, 200, { daemon: DAEMON, running: true, pid: process.pid, status: 'active' });
+  // —— Pro 激活链路（P-产品部署 步①，供客户端调；绝不 throw）——
+  if (is('/api/pro/status')) {
+    let st; try { st = require('./pro/activate').status(); } catch (e) { st = { activated: false, tier: 'lite', error: String((e && e.message) || e) }; }
+    let gate; try { gate = require('./pro/gate').getState(); } catch { gate = PRO_STATE; }
+    return sendJson(res, 200, { ...st, gate });
+  }
+  if (is('/api/pro/activate') && method === 'POST') {
+    const body = await readBody(req);
+    let r; try { r = await require('./pro/activate').activate(loadConfig(), body || {}); }
+    catch (e) { r = { ok: false, error: 'activate_error:' + String((e && e.message) || e) }; }
+    try { require('./pro/gate').init(loadConfig()); } catch { } // 激活后即时重判档位
+    return sendJson(res, (r && r.status && !r.ok) ? r.status : 200, r);
+  }
   if (is('/api/shutdown') && method === 'POST') {
     // 优雅关闭（客户端"停止后台"用）
     try { sendJson(res, 200, { ok: true, msg: '正在关闭后台服务' }); } catch { }
@@ -1643,6 +1656,9 @@ bootGuard();
 
 const cfg = loadConfig();
 fs.mkdirSync(cfg.workdir, { recursive: true });
+// —— Pro 分档启动门（soft-gate）—— 见 src/pro/gate.js。绝不 throw；默认开发放行（不锁死功能）。
+let PRO_STATE = { tier: 'pro', reason: 'pre-init' };
+try { PRO_STATE = require('./pro/gate').init(cfg); } catch (e) { PRO_STATE = { tier: 'pro', reason: 'init-error(fail-safe):' + (e && e.message || e) }; }
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
@@ -1668,6 +1684,7 @@ server.listen(cfg.port, cfg.host, () => {
   console.log(`│  桌面客户端: LeiZai.exe                        │`);
   console.log(`│  模型: ${cfg.model} · 缓存自动优化已开启 · 最大权限模式 ${cfg.fullAccess ? 'ON' : 'OFF'}`);
   console.log(`│  模式: ${DAEMON ? '守护进程(--daemon)' : '前台'}`);
+  console.log(`│  Pro 档位: ${PRO_STATE.tier}（${PRO_STATE.reason}）`);
   console.log('└─────────────────────────────────────────────┘');
   if (DAEMON) {
     try {

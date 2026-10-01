@@ -38,6 +38,9 @@ function skillMain(name) {
  */
 function savePackage(name, description, content, code, opts = {}) {
   ensure();
+  // Pro 门禁（soft-gate）：技能保存属 Pro；Lite 态拒绝。gate 绝不 throw，异常一律放行。
+  { let _pg = { allow: true }; try { _pg = require('./pro/gate').check('skill', { op: 'save', name }); } catch { } 
+    if (_pg.allow === false) throw new Error(`技能属 Pro 能力（当前 ${_pg.tier} 档｜${_pg.reason}），升级 Pro 后可用`); }
   const dir = pkgDir(name);
   fs.mkdirSync(dir, { recursive: true });
   const tag = opts.project ? `@project: ${opts.project}\n\n` : '';
@@ -78,6 +81,9 @@ function sanitizeNoteForCatalog(note) {
  *  @returns {string|null} SKILL.md 路径；技能不存在返回 null（不落盘、不建目录） */
 function improve(name, note, opts = {}) {
   ensure();
+  // Pro 门禁（soft-gate）：技能改进属 Pro；Lite 态拒绝。gate 绝不 throw，异常一律放行。
+  { let _pg = { allow: true }; try { _pg = require('./pro/gate').check('skill', { op: 'improve', name }); } catch { } 
+    if (_pg.allow === false) throw new Error(`技能属 Pro 能力（当前 ${_pg.tier} 档｜${_pg.reason}），升级 Pro 后可用`); }
   const f = currentFile(name);
   if (!f) return null;   // 技能不存在 → 不新建（新建只走显式 save_skill 流程）
   // 已有技能：追加改进节（保留历史，不覆盖；净化的 note 不改变 catalog 描述解析）

@@ -102,6 +102,9 @@ function assertNoShrink(target, oldContent, newContent, opts = {}) {
  */
 function propose(p) {
   ensure();
+  // Pro 门禁（soft-gate）：自我进化属 Pro；Lite 态拒绝。gate 绝不 throw，异常一律放行。
+  { let _pg = { allow: true }; try { _pg = require('./pro/gate').check('evolution', { op: 'propose' }); } catch { } 
+    if (_pg.allow === false) throw new Error(`自我进化属 Pro 能力（当前 ${_pg.tier} 档｜${_pg.reason}），升级 Pro 后可用`); }
   const target = p.target;
   const file = targetPath(target);
   const oldContent = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
@@ -150,6 +153,9 @@ function propose(p) {
  */
 async function approve(id, { auto = false, gate, gateTimeoutMs } = {}) {
   ensure();
+  // Pro 门禁（soft-gate）：进化生效属 Pro；Lite 态拒绝。gate 绝不 throw，异常一律放行。
+  { let _pg = { allow: true }; try { _pg = require('./pro/gate').check('evolution', { op: 'approve' }); } catch { } 
+    if (_pg.allow === false) throw new Error(`自我进化（生效）属 Pro 能力（当前 ${_pg.tier} 档｜${_pg.reason}），升级 Pro 后可用`); }
   const p = load(id);
   if (p.status === 'applied') return p;
   if (p.status === 'rejected') throw new Error('已被否决，不可批准（可重新提议）');

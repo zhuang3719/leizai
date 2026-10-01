@@ -229,6 +229,9 @@ function analyzeBoundaries() {
  * @returns {{at, memoryAudit, review, skillAudit, boundary, digest}}
  */
 function tick() {
+  // Pro 门禁（soft-gate）：自训练属 Pro；Lite 态拒绝。gate 绝不 throw，异常一律放行。
+  { let _pg = { allow: true }; try { _pg = require('./pro/gate').check('selftrain', { op: 'tick' }); } catch { } 
+    if (_pg.allow === false) throw new Error(`自训练属 Pro 能力（当前 ${_pg.tier} 档｜${_pg.reason}），升级 Pro 后可用`); }
   const memoryAudit = auditMemories();
   const review = reviewMemories();
   const skillAudit = auditSkills();

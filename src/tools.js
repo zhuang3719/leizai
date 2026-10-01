@@ -2009,6 +2009,17 @@ function roleBoundaryCheck(name, args, ctx) {
 }
 
 /** 按名字执行。 */
+// Pro 能力映射（**单一权威**）：工具名 → 能力名。仅此处维护，下层模块不各自硬编码。
+const TOOL_CAP = {
+  spawn_subagent: 'multi-agent',
+  agent_send: 'multi-agent',
+  agent_list: 'multi-agent',
+  propose_evolution: 'evolution',
+  save_memory: 'memory',
+  save_skill: 'skill',
+  self_train: 'selftrain',
+};
+
 async function exec(name, args, ctx) {
   const tool = TOOLS.find((t) => t.name === name);
   if (!tool) throw new Error(`未知工具: ${name}`);
@@ -2039,6 +2050,19 @@ async function exec(name, args, ctx) {
   let guard = null;
   try { guard = roleBoundaryCheck(name, args, ctx); } catch { guard = null; }
   if (guard && guard.mode === 'block') throw new Error(guard.msg);
+  // Pro 能力门禁（soft-gate · 唯一 chokepoint）：cap→工具映射见 TOOL_CAP。
+  // 默认开发放行（cfg.pro.devAllowAll / env LEIZAI_PRO_DEV=1）→ 无行为变化；Lite 态按 quota 限。
+  // 铁律：绝不 throw；任何异常一律放行（fail-safe，不阻塞执行）。
+  try {
+    const cap = TOOL_CAP[name];
+    if (cap) {
+      const g = await require('./pro/gate').checkPro(cap, { sessionId: ctx && ctx.sessionId, tool: name, args, ctx });
+      if (!g.allow) {
+        const q = g.quota ? `；上限 ${JSON.stringify(g.quota)}` : '';
+        return `⛔ 「${name}」属 Pro 能力（当前 ${g.tier} 档｜${g.reason}${q}）。升级 Pro 后可用。`;
+      }
+    }
+  } catch { /* gate 异常不得阻塞执行（fail-safe） */ }
   const out = await tool.execute(args, ctx);
   // ③ C：前缀操作成功后置位本代标志（纯内存，不落盘——重启/交接后 gen 变或字段丢失 → 自然重置，首次仍放行）。
   if (_pfxOp) {
@@ -2054,4 +2078,4 @@ async function exec(name, args, ctx) {
   return res;
 }
 
-module.exports = { TOOLS, definitions, exec, resolvePath, assertWritable, reloadPlugins, PLUGIN_DIR, inSelfModifyScope, isReadOnlyKeyPath, shadowCommit, validateDraft, roleBoundaryCheck, classifyTarget, instanceRoots, assertSafeWindow, isPrefixOperation };
+module.exports = { TOOLS, definitions, exec, resolvePath, assertWritable, reloadPlugins, PLUGIN_DIR, inSelfModifyScope, isReadOnlyKeyPath, shadowCommit, validateDraft, roleBoundaryCheck, classifyTarget, instanceRoots, assertSafeWindow, isPrefixOperation, TOOL_CAP };

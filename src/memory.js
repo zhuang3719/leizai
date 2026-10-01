@@ -316,6 +316,9 @@ function save(kind, name, content, opts = {}) {
   ensure();
   assertWritable(kind);
   const k = kind === 'skill' ? 'skill' : 'memory';
+  // Pro 门禁（soft-gate）：记忆/技能属 Pro；Lite 态拒绝。gate 绝不 throw，异常一律放行。
+  { let _pg = { allow: true }; try { _pg = require('./pro/gate').check(kind === 'skill' ? 'skill' : 'memory', { name }); } catch { } 
+    if (_pg.allow === false) throw new Error(`${kind === 'skill' ? '技能' : '记忆'}属 Pro 能力（当前 ${_pg.tier} 档｜${_pg.reason}），升级 Pro 后可用`); }
 
   if (kind === 'skill' && opts.code && String(opts.code).trim()) {
     invalidateSearchCache('skill');   // 清单 11/§L5：技能包写路径置脏
