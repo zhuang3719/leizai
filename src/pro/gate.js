@@ -66,30 +66,33 @@ function init(cfg) {
     const mode = _resolveMode(cfg);
     _mode = mode;                                  // P0-1：记录模式，供 _failSafe / init 兜底判定
     _inited = true;                                // ★必须早置位：否则早退分支会让 check() 用真实配置再 init 一次，覆盖显式判定
+    // P1-8：完整性互校**不再因 dev 模式跳过**；enforce 态**强制**（不可被 pro.integrity='off' 绕过），失败 → 降级 Lite。
+    const _p = _normalizePro(cfg);
+    if (_p.integrity !== 'off' || mode === 'enforce') {
+      let iv;
+      try { iv = require('./integrity').startupCheck(cfg); }
+      catch (e) { iv = { ok: false, reason: 'integrity-error:' + (e && e.message || e) }; }
+      if (!iv || iv.ok !== true) {
+        if (mode === 'enforce') {
+          _state = { tier: 'lite', reason: 'integrity-fail:' + ((iv && iv.reason) || 'unknown'), enabled: false };
+          return { ..._state };   // 强制态：完整性失败 → 不授予 Pro（降级 Lite；绝不崩）
+        }
+        try { console.warn('[pro-gate] integrity warn(dev, non-fatal): ' + ((iv && iv.reason) || 'unknown')); } catch { }
+      }
+    }
     if (mode === 'dev') {
       _state = { tier: 'pro', reason: _envDev() ? 'dev-env' : 'dev-allow-all', enabled: true };
     } else {
-      // 强制态：先做【完整性互校】（P3-c）。验签/互校不一致 → 降级 Lite（绝不崩）。
-      // 仅当显式 pro.integrity === 'off' 才跳过。
-      const _p = _normalizePro(cfg);
-      if (_p.integrity !== 'off') {
-        let iv;
-        try { iv = require('./integrity').startupCheck(cfg); }
-        catch (e) { iv = { ok: false, reason: 'integrity-error:' + (e && e.message || e) }; }
-        if (!iv || iv.ok !== true) {
-          _state = { tier: 'lite', reason: 'integrity-fail:' + ((iv && iv.reason) || 'unknown'), enabled: false };
-          return { ..._state };
-        }
-      }
       // 再判私模是否就位。缺私模 → Lite（绝不崩）。
       // 就位 → 先按 Lite，后台握手成功再升级 Pro（P3-b；握手失败保持 Lite）。
-      // enforce：**有授权 token 才 probe 私模**；无 token → Lite（绝不 throw / 绝不锁死）。
-      let hasLic = false;
-      try { hasLic = require('./activate').hasToken(); } catch { hasLic = false; }
+      // enforce：**必须有“有效”授权**（本地校验后的 exp + 离线窗口，含 P1-7 回拨保护）才 probe 私模；无效 → Lite。
+      let av = { activated: false, reason: 'unknown' };
+      try { av = require('./activate').status(); } catch (e) { av = { activated: false, reason: 'activate-error' }; }
+      const hasLic = av.activated === true;
       let exe = '';
       try { exe = require('./proclient').resolveProExe(cfg); } catch { exe = ''; }
       if (!hasLic) {
-        _state = { tier: 'lite', reason: 'no-license(enforce)', enabled: false };
+        _state = { tier: 'lite', reason: 'no-license(enforce):' + (av.reason || ''), enabled: false };
       } else if (!exe || !require('node:fs').existsSync(exe)) {
         _state = { tier: 'lite', reason: 'no-pro-module(enforce)', enabled: false };
       } else {
@@ -206,4 +209,20 @@ function _failSafe(cap, e) {
   return { allow: true, tier: 'pro', reason: 'gate-error(fail-safe-dev):' + (e && e.message || e), quota: null };
 }
 
-module.exports = { init, checkPro, check, getState, isPro, LITE_QUOTA, DEFAULTS, probeModule, getClient };
+/**
+ * 只按【当前授权有效性】重判档位（心跳后调用，P1-5c/P1-7）：无效 → Lite；有效则不动（保持既有已握手档位）。
+ * 与 init 的区别：不重跑完整性/不重新 probe 私模（避免每 6h 抖动）。**绝不 throw**。
+ */
+function revalidate(cfg) { // eslint-disable-line no-unused-vars
+  try {
+    if (_mode !== 'enforce') return { ..._state };
+    let av = { activated: false, reason: 'unknown' };
+    try { av = require('./activate').status(); } catch (e) { av = { activated: false, reason: 'activate-error' }; }
+    if (av.activated !== true) {
+      _state = { tier: 'lite', reason: 'no-license(enforce):' + (av.reason || ''), enabled: false };
+    }
+    return { ..._state };
+  } catch { return { ..._state }; }
+}
+
+module.exports = { init, refresh: init, revalidate, checkPro, check, getState, isPro, LITE_QUOTA, DEFAULTS, probeModule, getClient };

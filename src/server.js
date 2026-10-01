@@ -602,6 +602,7 @@ async function route(req, res, url) {
     let r; try { r = await require('./pro/activate').activate(loadConfig(), body || {}); }
     catch (e) { r = { ok: false, error: 'activate_error:' + String((e && e.message) || e) }; }
     try { require('./pro/gate').init(loadConfig()); } catch { } // 激活后即时重判档位
+    if (r && r.ok) { try { require('./pro/heartbeat').start(loadConfig()); } catch { } } // P1-5(c) 激活后启动心跳
     return sendJson(res, (r && r.status && !r.ok) ? r.status : 200, r);
   }
   if (is('/api/shutdown') && method === 'POST') {
@@ -1659,6 +1660,8 @@ fs.mkdirSync(cfg.workdir, { recursive: true });
 // —— Pro 分档启动门（soft-gate）—— 见 src/pro/gate.js。绝不 throw；默认开发放行（不锁死功能）。
 let PRO_STATE = { tier: 'pro', reason: 'pre-init' };
 try { PRO_STATE = require('./pro/gate').init(cfg); } catch (e) { PRO_STATE = { tier: 'lite', reason: 'init-error(fail-safe-lite):' + (e && e.message || e) }; }
+// P1-5（c）：启动周期授权心跳/续签（有 token 才启；失败不阻塞，离线窗口到点由 gate 降级）。
+try { require('./pro/heartbeat').start(cfg); } catch { /* 心跳启动失败不阻塞引擎 */ }
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);

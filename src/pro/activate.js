@@ -33,6 +33,25 @@ function _proCfg(cfg) {
 /** token 文件路径：<dataDir>/pro-token.json（运行时数据目录，不入仓）。 */
 function tokenPath() { return path.join(DATA_DIR, 'pro-token.json'); }
 
+// —— P1-7 时钟回拨保护：单调钟 + 持久化高水位（回拨不延长离线窗口）——
+//   performance.now() 单调（不受系统时钟调整影响）；跨进程/重启用持久化高水位 hw 兜底。
+let _hw = 0;                 // 高水位：曾见过的最大有效时间（持久化于 token 文件）
+let _monoBaseWall = 0;       // 单调钟基准（挂钟）
+let _monoBasePerf = 0;
+(function _initMono() {
+  try { const j = JSON.parse(fs.readFileSync(tokenPath(), 'utf8')); if (Number.isFinite(j && j.hw)) _hw = Math.max(_hw, Number(j.hw)); } catch { /* 无 token 文件 */ }
+  _monoBaseWall = Math.max(Date.now(), _hw);
+  _monoBasePerf = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
+})();
+/** 单调推进的当前时间 = max(挂钟, 单调钟, 高水位)；系统时钟被回拨**不会**使其回退。 */
+function effectiveNow() {
+  const p = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
+  const mono = _monoBasePerf ? (_monoBaseWall + (p - _monoBasePerf)) : Date.now();
+  const n = Math.max(Date.now(), mono, _hw);
+  if (n > _hw) _hw = n;
+  return n;
+}
+
 /** 稳定设备指纹（不含隐私明文）：hostname|platform|arch|user 的 sha256 前 32。 */
 function deviceId() {
   try {
@@ -42,8 +61,11 @@ function deviceId() {
 }
 
 function readToken() {
-  try { const j = JSON.parse(fs.readFileSync(tokenPath(), 'utf8')); return (j && j.token) ? j : null; }
-  catch { return null; }
+  try {
+    const j = JSON.parse(fs.readFileSync(tokenPath(), 'utf8'));
+    if (Number.isFinite(j && j.hw)) _hw = Math.max(_hw, Number(j.hw));   // P1-7：读盘即抬升回拨高水位
+    return (j && j.token) ? j : null;
+  } catch { return null; }
 }
 function hasToken() { return !!readToken(); }
 
@@ -52,7 +74,7 @@ function saveToken(obj) {
     const p = tokenPath();
     fs.mkdirSync(path.dirname(p), { recursive: true });
     // 尽力 0600（POSIX）；Windows 下 chmod 语义有限，仅作意图声明。
-    fs.writeFileSync(p, JSON.stringify(obj, null, 2), { encoding: 'utf8', mode: 0o600 });
+    fs.writeFileSync(p, JSON.stringify({ ...obj, hw: effectiveNow() }, null, 2), { encoding: 'utf8', mode: 0o600 });
     try { fs.chmodSync(p, 0o600); } catch { /* Windows 忽略 */ }
     return true;
   } catch { return false; }
@@ -98,8 +120,10 @@ async function activate(cfg, opts = {}) {
       maxOfflineMs: res.body.maxOfflineMs || null,
       deviceId: payload.deviceId,
       activatedAt: Date.now(),
+      onlineAt: effectiveNow(),          // P1-7：最近一次“在线”时间（单调钟），离线窗口从此起算
       serverTime: res.body.serverTime || null,
     };
+    if (Number(res.body.serverTime) > _hw) _hw = Number(res.body.serverTime);   // 服务端时间为权威锚点
     const saved = saveToken(rec);
     return { ok: saved, tier: rec.tier, exp: rec.exp, deviceId: rec.deviceId, saved };
   } catch (e) {
@@ -116,12 +140,21 @@ async function heartbeat(cfg) {
 
 function clearToken() { try { fs.rmSync(tokenPath(), { force: true }); return true; } catch { return false; } }
 
-/** 本地状态（不联网）：是否已激活 + 档位。 */
+/** 本地状态（不联网）：token 有效性 = 未过期 + 在离线窗口内；全程用单调钟，回拨不延长窗口。 */
 function status() {
   const t = readToken();
-  if (!t) return { activated: false, tier: 'lite' };
-  const expired = t.exp ? Date.now() > t.exp : false;
-  return { activated: !expired, tier: expired ? 'lite' : (t.tier || 'pro'), exp: t.exp, deviceId: t.deviceId, lic: t.lic };
+  if (!t) return { activated: false, tier: 'lite', reason: 'no-token' };
+  const now = effectiveNow();
+  const exp = Number(t.exp) || 0;
+  const onlineAt = Number(t.onlineAt || t.activatedAt) || now;
+  const offlineMs = Math.max(0, now - onlineAt);
+  const maxOfflineMs = Number(t.maxOfflineMs) || (72 * 60 * 60 * 1000);
+  const base = { exp, offlineMs, maxOfflineMs, deviceId: t.deviceId, lic: t.lic };
+  if (exp && now > exp) return { ...base, activated: false, tier: 'lite', reason: 'token-expired' };
+  if (maxOfflineMs > 0 && offlineMs > maxOfflineMs) return { ...base, activated: false, tier: 'lite', reason: 'offline-window-exceeded' };
+  return { ...base, activated: true, tier: t.tier || 'pro' };
 }
+/** P1-7：token 是否有效（供 gate enforce 判定；不再只看“文件存在”）。 */
+function isValid() { return status().activated === true; }
 
-module.exports = { activate, heartbeat, clearToken, status, hasToken, readToken, deviceId, tokenPath, DEFAULTS };
+module.exports = { activate, heartbeat, clearToken, status, isValid, hasToken, readToken, deviceId, tokenPath, effectiveNow, DEFAULTS };
