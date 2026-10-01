@@ -209,8 +209,9 @@ const DEFAULTS = {
   mailboxIdleSweepDelaysMs: [0, 5000, 30000],  // 复查时机（毫秒）；有界重试，幂等无空转
   mailboxStaleInboundWake: true,       // v6.53：知情类回执(reply/ack/notify)空闲兜底唤醒——超阈值未读且会话空闲 → 兜底唤醒一次（治漏收回执）；false 关
   mailboxStaleInboundWakeMs: 45000,    // v6.53：上述兜底的"停留阈值"(ms)：入站未读超过该时长才兜底唤醒。须 < mailboxSilentReadMinAgeMs(60000) 保证兜底先于静默标读（v6.53a）
-  // —— Pro 分档门禁（soft-gate）——见 src/pro/gate.js。默认 devAllowAll=true：无 license 也按 Pro 放行，绝不锁死功能。
-  pro: { devAllowAll: true, enforce: false, serverUrl: 'https://api.leizai.cc', licenseKey: '', deviceId: '', proModule: '' },
+  // —— Pro 分档门禁（soft-gate）——见 src/pro/gate.js。★P0-1 安全默认：devAllowAll=false（无 license → Lite）。
+  //    开发实例若要放行，须在 config.common.json / config.json 显式写 "pro":{"devAllowAll":true} 或用 env LEIZAI_PRO_DEV=1。
+  pro: { devAllowAll: false, enforce: false, serverUrl: 'https://api.leizai.cc', licenseKey: '', deviceId: '', proModule: '' },
 };
 
 /** 安全读 JSON：读文件→剥前导 BOM→JSON.parse。

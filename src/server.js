@@ -1658,7 +1658,7 @@ const cfg = loadConfig();
 fs.mkdirSync(cfg.workdir, { recursive: true });
 // —— Pro 分档启动门（soft-gate）—— 见 src/pro/gate.js。绝不 throw；默认开发放行（不锁死功能）。
 let PRO_STATE = { tier: 'pro', reason: 'pre-init' };
-try { PRO_STATE = require('./pro/gate').init(cfg); } catch (e) { PRO_STATE = { tier: 'pro', reason: 'init-error(fail-safe):' + (e && e.message || e) }; }
+try { PRO_STATE = require('./pro/gate').init(cfg); } catch (e) { PRO_STATE = { tier: 'lite', reason: 'init-error(fail-safe-lite):' + (e && e.message || e) }; }
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);

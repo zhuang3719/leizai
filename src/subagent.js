@@ -24,8 +24,24 @@ function inboxFile(id) { return path.join(INBOX_DIR, `${String(id).replace(/[^A-
 async function spawn(args, parentCtx) {
   ensure();
   // Pro 门禁（soft-gate）：多角色属 Pro；Lite 态拒绝。gate 绝不 throw，异常一律放行。
-  { let _pg = { allow: true }; try { _pg = await require('./pro/gate').checkPro('multi-agent', { op: 'spawn', role: args && args.role }); } catch { } 
-    if (_pg.allow === false) throw new Error(`多角色（子智能体）属 Pro 能力（当前 ${_pg.tier} 档｜${_pg.reason}），升级 Pro 后可用`); }
+  { let _pg = { allow: false, tier: 'lite', reason: 'gate-unavailable(fail-safe-lite)' }; try { _pg = await require('./pro/gate').checkPro('multi-agent', { op: 'spawn', role: args && args.role }); } catch { } 
+    if (_pg.allow === false) {
+      const _q = _pg.quota || {};
+      const _maxC = Number(_q.maxConcurrent), _maxR = Number(_q.maxRoles);
+      if (_maxC > 0 || _maxR > 0) {
+        // P0-4：Lite 配额真正执行（并发/角色数上限），而非只打印
+        let _recs = [];
+        try { _recs = fs.readdirSync(AGENT_DIR).filter((f) => f.endsWith('.json')).map((f) => { try { return JSON.parse(fs.readFileSync(path.join(AGENT_DIR, f), 'utf8')); } catch { return null; } }).filter(Boolean); } catch { _recs = []; }
+        const _running = _recs.filter((r) => r.status === 'running');
+        if (_maxC > 0 && _running.length >= _maxC) throw new Error(`Lite 档并发子智能体上限 ${_maxC}（当前 ${_running.length}），升级 Pro 后不限`);
+        if (_maxR > 0) {
+          const _roles = new Set(_recs.map((r) => String(r.role || '')));
+          if (_roles.size >= _maxR) throw new Error(`Lite 档子智能体角色数上限 ${_maxR}（当前 ${_roles.size}），升级 Pro 后不限`);
+        }
+      } else {
+        throw new Error(`多角色（子智能体）属 Pro 能力（当前 ${_pg.tier} 档｜${_pg.reason}），升级 Pro 后可用`);
+      }
+    } }
   pruneOld(); // 新派子智能体前清理过期旧记录，防无限膨胀
   const cfg = parentCtx.cfg;
   const id = `sub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -120,8 +136,9 @@ async function send(agentId, message, from, type, priority, extra) {
   const ex = (extra && typeof extra === 'object') ? extra : {};
   const prio = (priority === 'urgent' || priority === 'high' || priority === 'normal') ? priority : 'normal';
   // Pro 门禁（soft-gate）：派单协作属 Pro；Lite 态拒绝。gate 绝不 throw，异常一律放行。
-  { let _pg = { allow: true }; try { _pg = await require('./pro/gate').checkPro('multi-agent', { op: 'send', to: agentId, type: msgType }); } catch { } 
-    if (_pg.allow === false) throw new Error(`跨智能体通信（派单协作）属 Pro 能力（当前 ${_pg.tier} 档｜${_pg.reason}），升级 Pro 后可用`); }
+  { let _pg = { allow: false, tier: 'lite', reason: 'gate-unavailable(fail-safe-lite)' }; try { _pg = await require('./pro/gate').checkPro('multi-agent', { op: 'send', to: agentId, type: msgType }); } catch { } 
+    // P0-4：send 不新建角色，Lite 配额（maxRoles/maxConcurrent）不拦；仅无配额（mode off）时拦
+    if (_pg.allow === false) { const _q = _pg.quota || {}; if (!(Number(_q.maxRoles) > 0 || Number(_q.maxConcurrent) > 0)) throw new Error(`跨智能体通信（派单协作）属 Pro 能力（当前 ${_pg.tier} 档｜${_pg.reason}），升级 Pro 后可用`); } }
   // —— 统一信箱（共享 SQLite 库）优先：目标 role 已注册 → 落库 + HTTP 投递唤醒 ——
   // mailbox 不可用 / 目标未注册为 role（如本地 sub-*）→ 回退旧 jsonl 逻辑，行为兼容。
   try {

@@ -1,6 +1,6 @@
 {
   "name": "leizai",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "雷仔 —— 独立运行、可自我进化的 DeepSeek 智能体（灵感源自 Prime Agent 的 propose-not-apply 进化机制）",
   "main": "src/server.js",
   "scripts": {

@@ -317,8 +317,23 @@ function save(kind, name, content, opts = {}) {
   assertWritable(kind);
   const k = kind === 'skill' ? 'skill' : 'memory';
   // Pro 门禁（soft-gate）：记忆/技能属 Pro；Lite 态拒绝。gate 绝不 throw，异常一律放行。
-  { let _pg = { allow: true }; try { _pg = require('./pro/gate').check(kind === 'skill' ? 'skill' : 'memory', { name }); } catch { } 
-    if (_pg.allow === false) throw new Error(`${kind === 'skill' ? '技能' : '记忆'}属 Pro 能力（当前 ${_pg.tier} 档｜${_pg.reason}），升级 Pro 后可用`); }
+  { let _pg = { allow: false, tier: 'lite', reason: 'gate-unavailable(fail-safe-lite)' }; try { _pg = require('./pro/gate').check(kind === 'skill' ? 'skill' : 'memory', { name }); } catch { } 
+    if (_pg.allow === false) {
+      const _q = _pg.quota || {};
+      const _label = kind === 'skill' ? '技能' : '记忆';
+      if (_q.mode === 'off') throw new Error(`${_label}属 Pro 能力（当前 ${_pg.tier} 档｜${_pg.reason}），升级 Pro 后可用`);
+      const _max = Number(_q.max);
+      if (_max > 0) {
+        // P0-4：Lite 配额**真正执行**——新建受上限约束，更新已有条目不受限
+        let _exists = false; try { _exists = !!read(kind, name); } catch { _exists = false; }
+        if (!_exists) {
+          let _n = 0; try { _n = list(kind).length; } catch { _n = 0; }
+          if (_n >= _max) throw new Error(`Lite 档${_label}上限 ${_max} 条（当前 ${_n}），升级 Pro 后不限`);
+        }
+      } else {
+        throw new Error(`${_label}属 Pro 能力（当前 ${_pg.tier} 档｜${_pg.reason}），升级 Pro 后可用`);
+      }
+    } }
 
   if (kind === 'skill' && opts.code && String(opts.code).trim()) {
     invalidateSearchCache('skill');   // 清单 11/§L5：技能包写路径置脏

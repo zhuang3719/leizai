@@ -27,16 +27,20 @@ const LITE_QUOTA = {
 };
 
 const DEFAULTS = {
-  devAllowAll: true,                 // ★开发兜底：默认放行（真实部署时显式设 false）
-  enforce: false,                    // true=严格（异常→Lite）；false=可用性优先（异常→Pro）
+  devAllowAll: false,                // ★P0-1 安全默认：不显式设 true 即 enforce（无 license → Lite）。开发实例须显式开。
+  enforce: false,                    // true=显式强制（异常→Lite）；与 devAllowAll 互斥时优先 enforce
   serverUrl: 'https://api.leizai.cc',// P2 服务端（/pro/verify）
   licenseKey: '',                    // 由客户端/壳注入（不落明文仓）
   deviceId: '',                      // 机器指纹
   proModule: '',                     // 私模路径（缺省 pro/leizai-pro.exe）
 };
 
-// 运行态（init 前默认 Pro：绝不在启动早期限制功能）
-let _state = { tier: 'pro', reason: 'pre-init', enabled: false };
+// 运行态（P0-1：init 前默认 Lite —— 安全默认；绝不因"还没 init"就全放行）
+let _state = { tier: 'lite', reason: 'pre-init', enabled: false };
+let _mode = 'enforce';   // 由 init 解析；默认 enforce（安全）
+let _inited = false;
+const _CAP_TTL_MS = 30 * 1000;      // P0-1②：私模权威结论缓存 TTL
+const _capCache = new Map();
 
 function _envDev() { return process.env.LEIZAI_PRO_DEV === '1'; }
 
@@ -47,9 +51,10 @@ function _normalizePro(cfg) {
 
 function _resolveMode(cfg) {
   const p = _normalizePro(cfg);
-  if (_envDev()) return 'dev';
-  if (p.devAllowAll === false || p.enforce === true) return 'enforce';
-  return 'dev'; // 默认 dev（不锁死）
+  if (_envDev()) return 'dev';                 // 显式逃生阀：LEIZAI_PRO_DEV=1
+  if (p.enforce === true) return 'enforce';    // 显式强制（优先）
+  if (p.devAllowAll === true) return 'dev';    // 显式开发放行（必须显式配置，不设即安全）
+  return 'enforce';                            // ★P0-1 默认安全：无 license → Lite
 }
 
 /**
@@ -59,6 +64,8 @@ function _resolveMode(cfg) {
 function init(cfg) {
   try {
     const mode = _resolveMode(cfg);
+    _mode = mode;                                  // P0-1：记录模式，供 _failSafe / init 兜底判定
+    _inited = true;                                // ★必须早置位：否则早退分支会让 check() 用真实配置再 init 一次，覆盖显式判定
     if (mode === 'dev') {
       _state = { tier: 'pro', reason: _envDev() ? 'dev-env' : 'dev-allow-all', enabled: true };
     } else {
@@ -91,8 +98,12 @@ function init(cfg) {
       }
     }
   } catch (e) {
-    _state = { tier: 'pro', reason: 'init-error(fail-safe):' + (e && e.message || e), enabled: false };
+    // P0-1：init 异常也**绝不默认放行** —— enforce 态落 Lite；仅 dev 态保持放行
+    _state = (_mode === 'enforce')
+      ? { tier: 'lite', reason: 'init-error(fail-safe-lite):' + (e && e.message || e), enabled: false }
+      : { tier: 'pro', reason: 'init-error(dev):' + (e && e.message || e), enabled: false };
   }
+  _inited = true;
   return { ..._state };
 }
 
@@ -135,29 +146,64 @@ function _decide(cap) {
   return { allow: false, tier: 'lite', reason: _state.reason, quota: LITE_QUOTA[cap] || null };
 }
 
+/** 惰性 init：未显式 init 时按本机配置判定一次（安全默认 enforce）。绝不 throw。 */
+function _ensureInit() {
+  if (_inited) return;
+  try { init(require('../config').load()); } catch (e) { _mode = 'enforce'; _state = { tier: 'lite', reason: 'lazy-init-error(fail-safe-lite):' + (e && e.message || e), enabled: false }; _inited = true; }
+}
+
 /** 同步判定（供同步调用点使用，如 evolution.propose / memory.save / skills.savePackage） */
 function check(cap, ctx = {}) { // eslint-disable-line no-unused-vars
   try {
+    _ensureInit();
     return _decide(cap);
   } catch (e) {
     return _failSafe(cap, e);
   }
 }
 
-/** 异步判定（供 async 调用点使用，如 tools.exec / subagent.spawn） */
+/** 同步判定 + 私模权威复核（P0-1②）。env/同步路径无法等待 RPC 时退回本地判定。 */
+function _decideLocal(cap) { _ensureInit(); return _decide(cap); }
+
+/**
+ * 异步判定（供 async 调用点使用，如 tools.exec / subagent.spawn）。
+ * P0-1②：判定**下沉闭源私模** —— tier=pro 时向 `pro/leizai-pro.exe` 求 `pro.check` 权威结论；
+ *   私模不可用/超时/报错 → 一律回落 **Lite（fail-safe）**。结果按 cap 缓存 30s。
+ */
 async function checkPro(cap, ctx = {}) { // eslint-disable-line no-unused-vars
   try {
-    return _decide(cap);
+    _ensureInit();
+    const local = _decide(cap);
+    if (_mode !== 'enforce') return local;             // dev 态：本地放行（不打扰私模）
+    if (!cap) return local;
+    const now = Date.now();
+    const hit = _capCache.get(cap);
+    if (hit && (now - hit.at) < _CAP_TTL_MS) return hit.val;
+    // 需要私模权威（tier=pro 才可能 allow）
+    if (_state.tier !== 'pro' || !_client || !_client.available) {
+      const deny = { allow: false, tier: 'lite', reason: 'gate-authority-unavailable:' + _state.reason, quota: LITE_QUOTA[cap] || null };
+      _capCache.set(cap, { at: now, val: deny });
+      return deny;
+    }
+    let r;
+    try { r = await _client.call('pro.check', { cap, ctx }); }
+    catch (e) { r = null; }
+    const val = (r && typeof r.allow === 'boolean')
+      ? { allow: !!r.allow, tier: r.tier || 'pro', reason: r.reason || 'pro-module', quota: r.quota || null }
+      : { allow: false, tier: 'lite', reason: 'gate-authority-error(fail-safe-lite)', quota: LITE_QUOTA[cap] || null };
+    _capCache.set(cap, { at: now, val });
+    return val;
   } catch (e) {
     return _failSafe(cap, e);
   }
 }
 
 function _failSafe(cap, e) {
-  // 强制态 → Lite（不误放行）；其余 → Pro（可用性优先，绝不锁死）
-  const strict = _state && typeof _state.reason === 'string' && _state.reason.startsWith('no-license');
-  if (strict) return { allow: false, tier: 'lite', reason: 'gate-error(fail-safe-lite):' + (e && e.message || e), quota: LITE_QUOTA[cap] || null };
-  return { allow: true, tier: 'pro', reason: 'gate-error(fail-safe-pro):' + (e && e.message || e), quota: null };
+  // P0-1：enforce 态异常**绝不默认放行** → Lite；dev 态才放行（可控开发放行）
+  if (_mode === 'enforce') {
+    return { allow: false, tier: 'lite', reason: 'gate-error(fail-safe-lite):' + (e && e.message || e), quota: LITE_QUOTA[cap] || null };
+  }
+  return { allow: true, tier: 'pro', reason: 'gate-error(fail-safe-dev):' + (e && e.message || e), quota: null };
 }
 
 module.exports = { init, checkPro, check, getState, isPro, LITE_QUOTA, DEFAULTS, probeModule, getClient };

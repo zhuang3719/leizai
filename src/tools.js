@@ -2056,13 +2056,15 @@ async function exec(name, args, ctx) {
   try {
     const cap = TOOL_CAP[name];
     if (cap) {
-      const g = await require('./pro/gate').checkPro(cap, { sessionId: ctx && ctx.sessionId, tool: name, args, ctx });
-      if (!g.allow) {
-        const q = g.quota ? `；上限 ${JSON.stringify(g.quota)}` : '';
-        return `⛔ 「${name}」属 Pro 能力（当前 ${g.tier} 档｜${g.reason}${q}）。升级 Pro 后可用。`;
+      let g;
+      try { g = await require('./pro/gate').checkPro(cap, { sessionId: ctx && ctx.sessionId, tool: name, args, ctx }); }
+      catch (e) { g = { allow: false, tier: 'lite', reason: 'gate-unavailable(fail-safe-lite)', quota: null }; }
+      if (!g || g.allow !== true) {
+        const q = g && g.quota ? `；上限 ${JSON.stringify(g.quota)}` : '';
+        return `⛔ 「${name}」属 Pro 能力（当前 ${(g && g.tier) || 'lite'} 档｜${(g && g.reason) || 'gate-unavailable'}${q}）。升级 Pro 后可用。`;
       }
     }
-  } catch { /* gate 异常不得阻塞执行（fail-safe） */ }
+  } catch { /* 非门禁异常不得阻塞执行 */ }
   const out = await tool.execute(args, ctx);
   // ③ C：前缀操作成功后置位本代标志（纯内存，不落盘——重启/交接后 gen 变或字段丢失 → 自然重置，首次仍放行）。
   if (_pfxOp) {

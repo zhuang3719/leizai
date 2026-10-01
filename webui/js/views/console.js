@@ -14,6 +14,7 @@ export const SettingsNav = defineComponent({
     <button class="subtab" :class="{ 'is-active': cur==='model' }" data-pane="model" @click="pick('model')">大模型配置</button>
     <button class="subtab" :class="{ 'is-active': cur==='perm' }" data-pane="perm" @click="pick('perm')">权限</button>
     <button class="subtab" :class="{ 'is-active': cur==='backend' }" data-pane="backend" @click="pick('backend')">后端与数据</button>
+    <button class="subtab" :class="{ 'is-active': cur==='pro' }" data-pane="pro" @click="pick('pro')">Pro 激活</button>
     <button class="subtab" :class="{ 'is-active': cur==='about' }" data-pane="about" @click="pick('about')">关于</button>
   `,
 });
@@ -22,6 +23,20 @@ export const SettingsForm = defineComponent({
   name: 'SettingsForm',
   setup() {
     const cfg = ref({}); const balance = ref(null); const pane = ref('model');
+    // P0-3：Pro 激活入口（输入激活码 → /api/pro/activate → 显示档位/结果）
+    const proState = ref(null); const licInput = ref(''); const activating = ref(false);
+    async function loadPro() { try { proState.value = await api.get('/api/pro/status'); } catch (e) { proState.value = { error: e.message }; } }
+    async function doActivate() {
+      const key = String(licInput.value || '').trim();
+      if (!key) { toast('请输入激活码', 'err'); return; }
+      activating.value = true;
+      try {
+        const r = await api.post('/api/pro/activate', { licenseKey: key });
+        if (r && r.ok) { toast('激活成功 · 档位 ' + (r.tier || 'pro'), 'ok'); licInput.value = ''; }
+        else { toast('激活失败：' + ((r && r.error) || 'unknown'), 'err'); }
+      } catch (e) { toast('激活失败：' + e.message, 'err'); }
+      finally { activating.value = false; await loadPro(); }
+    }
     // v1：行内保存状态——选择类（开关/下拉）即时保存后闪「已保存 ✓」；输入类改动后显「未保存」
     const dirty = ref(false);
     const savedTip = ref(false);
@@ -29,7 +44,7 @@ export const SettingsForm = defineComponent({
     function markDirty() { dirty.value = true; savedTip.value = false; }
     function markSaved() { dirty.value = false; savedTip.value = true; if (_tipTimer) clearTimeout(_tipTimer); _tipTimer = setTimeout(() => { savedTip.value = false; }, 1600); }
     const budgetInput = ref(null);   // 预算输入框（模板 ref，供显式「保存」按钮取值）
-    window.addEventListener('leizai-settings-pane', (e) => { pane.value = e.detail; if (e.detail === 'model') loadUsage(); });
+    window.addEventListener('leizai-settings-pane', (e) => { pane.value = e.detail; if (e.detail === 'model') loadUsage(); if (e.detail === 'pro') loadPro(); });
     // —— 控制台·提供商表单（最小集）：提供商切换 / API Key / 模型 ——
     //   安全约定：key 只进不出——输入框永不从 cfg 回填；读到的明文 apiKeys 只转成"是否已设置"布尔后立即从内存抹除。
     const providers = ref([]);
@@ -196,7 +211,7 @@ export const SettingsForm = defineComponent({
         } else toast('保存失败: ' + e.message, 'err');
       }
     }
-    return { cfg, balance, pane, save, saveBudget, showOnboarding, saveArchiveCap, usageMax, capInput, restartBackend, toggleFullAccess, dirty, savedTip, markDirty, budgetInput, store, load,
+    return { cfg, balance, pane, save, saveBudget, showOnboarding, saveArchiveCap, usageMax, capInput, restartBackend, toggleFullAccess, dirty, savedTip, markDirty, budgetInput, store, load, proState, licInput, activating, doActivate, loadPro,
              providers, curProvider, autoSwitchTip, curBaseURL, keyVal, keyPresence, keyPlaceholder, modelOptions, saveModel, modelOpen, modelHi, modelCombo, modelPopupStyle, openModel, closeModelSoon, toggleModel, pickModel, onModelKey,
              curTemp, curWorkdir, curPythonPath,
              onProviderChange, saveProvider };
@@ -318,6 +333,27 @@ export const SettingsForm = defineComponent({
             <div class="form-row__hint" v-if="usageMax != null">当前最大会话占用约 {{ usageMax }} MB</div>
             <div class="form-row__hint is-err" v-if="+cfg.archiveMaxSizeMB > 0 && +cfg.archiveMaxSizeMB < 50">⚠ 低于 50MB 不会生效（安全下限），如 1 也不会清理。</div>
             <div class="form-row__hint is-err">调低并保存会立即清理超出的旧数据，需二次确认。</div></div></div>
+      </div>
+    </template>
+    <template v-else-if="pane==='pro'">
+      <div class="set-group">
+        <h4 class="set-group__title">Pro 激活<span class="set-group__desc">输入激活码解锁 Pro 能力</span></h4>
+        <div class="form-row"><div class="form-row__label">当前档位</div>
+          <div>
+            <span class="mono">{{ proState ? (proState.gate && proState.gate.tier || proState.tier || '—') : '读取中…' }}</span>
+            <span class="form-row__hint" style="display:inline;margin-left:8px;" v-if="proState && proState.gate && proState.gate.reason">{{ proState.gate.reason }}</span>
+            <div class="form-row__hint" v-if="proState && proState.exp">到期：{{ new Date(proState.exp).toLocaleString() }}</div>
+            <div class="form-row__hint" v-if="proState && proState.activated">已激活 · {{ proState.lic || '' }}</div>
+            <div class="form-row__hint is-err" v-if="proState && proState.error">{{ proState.error }}</div>
+          </div></div>
+        <div class="form-row"><div class="form-row__label">激活码</div>
+          <div>
+            <input class="input" v-model="licInput" placeholder="粘贴激活码（如 XXXX-XXXX-…）" @keyup.enter="doActivate" />
+            <button class="btn btn--sm" style="margin-left:8px;" :disabled="activating" @click="doActivate">{{ activating ? '激活中…' : '激活' }}</button>
+            <div class="form-row__hint">激活后按 Pro 档运行；Lite 档：有限记忆/技能、无自我进化、限多角色。</div>
+          </div></div>
+        <div class="form-row"><div class="form-row__label"></div>
+          <div><button class="btn btn--ghost btn--sm" @click="loadPro">刷新状态</button></div></div>
       </div>
     </template>
     <template v-else>

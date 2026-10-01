@@ -39,8 +39,16 @@ function skillMain(name) {
 function savePackage(name, description, content, code, opts = {}) {
   ensure();
   // Pro 门禁（soft-gate）：技能保存属 Pro；Lite 态拒绝。gate 绝不 throw，异常一律放行。
-  { let _pg = { allow: true }; try { _pg = require('./pro/gate').check('skill', { op: 'save', name }); } catch { } 
-    if (_pg.allow === false) throw new Error(`技能属 Pro 能力（当前 ${_pg.tier} 档｜${_pg.reason}），升级 Pro 后可用`); }
+  { let _pg = { allow: false, tier: 'lite', reason: 'gate-unavailable(fail-safe-lite)' }; try { _pg = require('./pro/gate').check('skill', { op: 'save', name }); } catch { } 
+    if (_pg.allow === false) {
+      const _q = _pg.quota || {}; const _max = Number(_q.max);
+      if (_q.mode === 'off' || !(_max > 0)) throw new Error(`技能属 Pro 能力（当前 ${_pg.tier} 档｜${_pg.reason}），升级 Pro 后可用`);
+      // P0-4：Lite 配额真正执行——新建受上限约束
+      let _n = 0;
+      try { _n = fs.readdirSync(SKILL_DIR).filter((d) => { try { return fs.existsSync(path.join(SKILL_DIR, d, 'SKILL.md')); } catch { return false; } }).length; } catch { _n = 0; }
+      const _exists = fs.existsSync(pkgDir(name));
+      if (!_exists && _n >= _max) throw new Error(`Lite 档技能上限 ${_max} 个（当前 ${_n}），升级 Pro 后不限`);
+    } }
   const dir = pkgDir(name);
   fs.mkdirSync(dir, { recursive: true });
   const tag = opts.project ? `@project: ${opts.project}\n\n` : '';
@@ -82,8 +90,9 @@ function sanitizeNoteForCatalog(note) {
 function improve(name, note, opts = {}) {
   ensure();
   // Pro 门禁（soft-gate）：技能改进属 Pro；Lite 态拒绝。gate 绝不 throw，异常一律放行。
-  { let _pg = { allow: true }; try { _pg = require('./pro/gate').check('skill', { op: 'improve', name }); } catch { } 
-    if (_pg.allow === false) throw new Error(`技能属 Pro 能力（当前 ${_pg.tier} 档｜${_pg.reason}），升级 Pro 后可用`); }
+  { let _pg = { allow: false, tier: 'lite', reason: 'gate-unavailable(fail-safe-lite)' }; try { _pg = require('./pro/gate').check('skill', { op: 'improve', name }); } catch { } 
+    // P0-4：改进只作用于**已存在**技能，Lite 配额（max）不拦；仅 mode:'off' 拦
+    if (_pg.allow === false && ((_pg.quota || {}).mode === 'off')) throw new Error(`技能属 Pro 能力（当前 ${_pg.tier} 档｜${_pg.reason}），升级 Pro 后可用`); }
   const f = currentFile(name);
   if (!f) return null;   // 技能不存在 → 不新建（新建只走显式 save_skill 流程）
   // 已有技能：追加改进节（保留历史，不覆盖；净化的 note 不改变 catalog 描述解析）
