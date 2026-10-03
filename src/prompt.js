@@ -6,7 +6,7 @@
 //  3) 加了技能/进化后前缀会变——这是一次成本换长期收益，之后每条消息命中该新前缀。
 const fs = require('node:fs');
 const path = require('node:path');
-const { DATA_DIR, load: loadConfig } = require('./config');
+const { DATA_DIR, ROOT, load: loadConfig } = require('./config');
 
 const SYSTEM_PATH = path.join(DATA_DIR, 'prompts', 'system.md');
 const HARNESS_PATH = path.join(DATA_DIR, 'prompts', 'harness.md');
@@ -64,6 +64,49 @@ function identityOverlay() {
   } catch { return ''; }
 }
 
+// —— P0（2026-10-03）：发布包 prompts 播种，修复干净安装对话不可用 ——
+// 症状：干净安装 → POST /api/chat 报 ENOENT <DATA_DIR>\prompts\system.md → 对话不可用。
+// 方案：启动时若无 prompts 模板，先播种；systemPrompt() 内 readFileSync 亦加 try/catch 兜底。
+// 仅当模板目录 <ROOT>/templates/prompts/ 存在并有内容时，部分植入 <DATA_DIR>/prompts/；模板亦缺则写内置最小串兜底。
+const TEMPLATES_PROMPTS_DIR = path.join(ROOT, 'templates', 'prompts');
+const MIN_SYSTEM_FALLBACK = [
+  '# 雷仔 · 行为规则（最小兜底）',
+  '',
+  '你在本机运行，是一个自我进化型智能体。当前提示词模板缺失，此处为内置最小兜底句。',
+  '请尽快补回 prompts/system.md。',
+  '',
+].join('\n');
+
+/**
+ * 播种 prompts（内容等）到目标 <DATA_DIR>/prompts/。
+ * 规则：①各文件**缺失才**从模板复制；**已存在绝不覆盖**；②模板也缺 → system.md 写非空最小串 + console.warn；**绝不抛错**。
+ *       ③mkdir -p 目标目录；整体包在 try 内，失败不抛。
+ * @returns {{seeded:string[], skipped:string[], fallback:boolean, dst:string}}
+ */
+function ensurePrompts() {
+  const out = { seeded: [], skipped: [], fallback: false, dst: path.join(DATA_DIR, 'prompts') };
+  const dstDir = out.dst;
+  try { fs.mkdirSync(dstDir, { recursive: true }); }
+  catch (e) { try { console.warn('[prompt] 创建 prompts 目录失败：' + (e && e.message)); } catch { } return out; }
+  for (const name of ['system.md', 'harness.md']) {
+    const dst = path.join(dstDir, name);
+    try { if (fs.existsSync(dst)) { out.skipped.push(name); continue; } } catch { }
+    const tpl = path.join(TEMPLATES_PROMPTS_DIR, name);
+    try {
+      if (fs.existsSync(tpl)) { fs.copyFileSync(tpl, dst); out.seeded.push(name); continue; }
+    } catch (e) { try { console.warn(`[prompt] 复制模板 ${name} 失败：` + (e && e.message)); } catch { } }
+    // 模板缺 → 为 system.md 写非空最小兜底（harness.md 缺失不影响，readHarness 返回空）
+    if (name === 'system.md') {
+      try {
+        fs.writeFileSync(dst, MIN_SYSTEM_FALLBACK, 'utf8');
+        out.seeded.push('system.md(fallback)'); out.fallback = true;
+        try { console.warn('[prompt] 模板缺失，system.md 已写内置最小兜底（非空，绝不抛错）。'); } catch { }
+      } catch { }
+    }
+  }
+  return out;
+}
+
 let lastCache = null;
 /**
  * 返回当前稳定前缀（内容变化时自动重算 —— 只有进化/技能变化会触发）。
@@ -108,4 +151,4 @@ function rawGenome() {
   return fs.readFileSync(SYSTEM_PATH, 'utf8');
 }
 
-module.exports = { systemPrompt, identityOverlay, rawGenome, rawHarness, readHarness, skillCatalog, SYSTEM_PATH, HARNESS_PATH, SKILLS_DIR };
+module.exports = { systemPrompt, identityOverlay, rawGenome, rawHarness, readHarness, skillCatalog, ensurePrompts, SYSTEM_PATH, HARNESS_PATH, SKILLS_DIR };

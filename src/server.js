@@ -1681,6 +1681,9 @@ server.on('connection', (socket) => {
   try { socket.setNoDelay(true); } catch { }
 });
 
+// P0（2026-10-03）：启动播种 prompts —— 干净安装时无 <DATA_DIR>/prompts/system.md 会导致 /api/chat ENOENT、对话不可用。
+try { require('./prompt').ensurePrompts(); } catch (e) { console.warn('[启动] 播种prompts失败(不阻断)：' + (e && e.message)); }
+
 server.listen(cfg.port, cfg.host, () => {
   console.log('┌─────────────────────────────────────────────┐');
   console.log('│  ⚡ 雷仔 · 自我进化型智能体 已启动           │');
