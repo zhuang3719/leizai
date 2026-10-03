@@ -51,6 +51,10 @@ npm run smoke        # 冒烟测试（scripts/api-smoke.mjs）
 - **手动清理**：如需彻底清除，关闭程序后删除 `%LOCALAPPDATA%\LeiZaiData` 即可。
 - 便携版（Portable）数据跟随解压目录；可用 `portable.flag` 标记绿色目录。
 
+## 版本与源码 tag
+
+源码 tag 对应产品版本；产品版本因壳/打包变更也会递增；v0.1.6/v0.1.7 引擎源码无变更，未单独打 tag。
+
 ## 许可证
 
 本项目以 **Apache License 2.0** 发布，详见 [LICENSE](./LICENSE)。
