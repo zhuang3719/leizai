@@ -49,7 +49,16 @@ function archiveFile(sessionId) {
  */
 function init(opts = {}) {
   if (opts && opts.dir) ARCHIVE_DIR = opts.dir;
-  fs.mkdirSync(ARCHIVE_DIR, { recursive: true });
+  // E-3b（2026-10-03）：数据目录不可用（ENOTDIR/EACCES/EPERM…）不得抛未捕获异常 → 明确中文报错后优雅退出。
+  try {
+    fs.mkdirSync(ARCHIVE_DIR, { recursive: true });
+  } catch (e) {
+    const _m = String((e && e.message) || e).split('\n')[0];
+    const _reason = (e && e.code && !_m.includes(e.code)) ? e.code + ': ' + _m : _m;
+    const _msg = `[雷仔] 数据目录不可用，无法启动：\n  路径：${ARCHIVE_DIR}\n  原因：${_reason}\n  请检查 LEIZAI_DATA_DIR / 数据目录配置或目录权限（其父级可能是一个文件）。`;
+    try { process.stderr.write(_msg + '\n'); } catch { try { console.error(_msg); } catch { } }
+    process.exit(1);
+  }
   let target = 'jsonl';
   if (!(opts && opts.force)) {
     try {

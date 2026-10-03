@@ -305,4 +305,27 @@ function save(cfg) {
 // config.dataDir 已退役为「播种来源」——不再作运行时权威，避免与 env 两套并存。
 const DATA_DIR = P.dataDir();
 
+// E-3b（2026-10-03）：数据目录不可用（ENOTDIR/EACCES/EPERM…）不得抛未捕获异常。
+// 纯校验（无副作用）：沿路径上溯到最近存在的祖先，若其为文件（非目录）→ 明确中文报错后优雅退出。
+(function guardDataDir() {
+  let d = path.resolve(DATA_DIR);
+  let bad = null;
+  for (;;) {
+    try {
+      const st = fs.statSync(d);
+      if (!st.isDirectory()) { bad = Object.assign(new Error('路径已存在但不是目录（可能是文件）'), { code: 'ENOTDIR' }); }
+      break;
+    } catch (e) {
+      if (e && e.code === 'ENOENT') { const up = path.dirname(d); if (up === d) break; d = up; continue; }
+      bad = e; break;
+    }
+  }
+  if (!bad) return;
+  const reason = ((bad && bad.code) ? bad.code + ': ' : '') + String((bad && bad.message) || bad).split('\n')[0];
+  const msg = `[雷仔] 数据目录不可用，无法启动：\n  路径：${DATA_DIR}\n  原因：${reason}\n  请检查环境变量 LEIZAI_DATA_DIR / 数据目录配置或目录权限。`;
+  try { process.stderr.write(msg + '\n'); } catch { try { console.error(msg); } catch { } }
+  process.exit(1);
+})();
+
+
 module.exports = { ROOT, CONFIG_PATH, COMMON_PATH, configPath, DATA_DIR, load, save, looksMojibake };
